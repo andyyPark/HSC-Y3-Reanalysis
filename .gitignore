@@ -3,6 +3,6 @@ data/log/
 
 script/log/
 script/__pycache__
-script/computer_power.sh
+script/compute_power.sh
 
 cosmosis/
