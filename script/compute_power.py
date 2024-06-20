@@ -9,13 +9,8 @@ from utils_shear_ana import catutil
 import pymaster as nmt
 import time
 import schwimmbad
+from constants import *
 
-NZ_BINS = 4
-NZ_PAIRS = int(NZ_BINS * (NZ_BINS + 1) / 2)
-BIN_PAIRS = [(i, j) for i in range(NZ_BINS) for j in range(i, NZ_BINS)]
-BP2INDEX = {bp: i for i, bp in enumerate(BIN_PAIRS)}
-STR2DEG = 4 * np.pi * (180 / np.pi) ** 2
-FSKY = 416 / STR2DEG
 
 
 def get_processor_count(pool, args):
@@ -33,27 +28,28 @@ def get_processor_count(pool, args):
 
 class PowerWorker(object):
 
-    def __init__(self, nside, power=True, noise=False, noise_analytic=False, overwrite=False):
+    def __init__(self, nside, power=True, noise=False, noise_analytic=False, save_window=False, overwrite=False):
         self.nside = nside
         self.npix = hp.nside2npix(nside)
         self.power = power
         self.noise = noise
         self.noise_analytic = noise_analytic
+        self.save_window = save_window
         self.overwrite = overwrite
         self.ell_max = 3 * nside
         self.Omega_pix = hp.nside2pixarea(nside, degrees=False)
 
         self.output_folder = os.path.join("../data", f"output_{nside}")
         if not os.path.exists(self.output_folder):
-            os.makedir(self.output_folder)
+            os.mkdir(self.output_folder)
 
     def run(self, idx):
-        if not power: return
+        if not self.power: return
         start = time.time()
         i, j = BIN_PAIRS[idx]
         print(f"Running nside={nside} for bin pair ({i}, {j})")
         power = np.zeros((3, self.ell_max), dtype=float)
-        power_file = os.path.join(output_folder, f"pseudo_ps_{nside}_{i}_{j}.fits")
+        power_file = os.path.join(self.output_folder, f"pseudo_ps_{nside}_{i}_{j}.fits")
         if os.path.exists(power_file) and not self.overwrite:
             print(f"{power_file} exists and overwrite is set to False")
             return
@@ -140,10 +136,11 @@ class PowerWorker(object):
         if save_window:
             if os.path.exists(window_file) and not self.overwrite:
                 print(f"Window map for redshift {i} exists and overwrite is set to False")
-            window = Ngal / Nbar
-            window[Ngal == 0] = hp.UNSEEN
-            window_file = os.path.join(self.output_folder, f"window_{i}_{self.nside}.fits")
-            pyfits.writeto(window_file, window, overwrite=True)
+            else:
+                window = Ngal / Nbar
+                window[Ngal == 0] = hp.UNSEEN
+                window_file = os.path.join(self.output_folder, f"window_{self.nside}_{i}.fits")
+                pyfits.writeto(window_file, window, overwrite=True)
         end = time.time()
         print(f"Finished getting map {i} in {end - start} seconds.")
 
@@ -176,7 +173,7 @@ class PowerWorker(object):
                 shape1_meas=meas1,
                 shape2_meas=meas2,
             )
-            mask, g1_map, g2_map = self.get_map(pixels, e1_mock, e2_mock, save_window=False, i=None)
+            mask, g1_map, g2_map = self.get_map(pixels, e1_mock, e2_mock, save_window=False, i=seed)
             field = nmt.NmtField(mask, [g1_map, g2_map], spin=2, lite=True)
             cl_coupled = nmt.compute_coupled_cell(field, field)
             Nl[0, seed] = cl_coupled[0] ## EE
@@ -209,15 +206,22 @@ if __name__ == "__main__":
     parser.add_argument(
         "--noise_analytic",
         dest="noise_analytic",
-        default=True,
+        default=False,
         action="store_true",
         help="whether to compute the noise power spectra (pseudo) analytically",
     )
     parser.add_argument(
         "--save_window",
-        default=True,
-        type=bool,
+        dest="save_window",
+        default=False,
+        action="store_true",
         help="whether to save the window function",
+    )
+    parser.add_argument(
+        "--auto",
+        default=False,
+        type=bool,
+        help="whether to only compute auto"
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -241,13 +245,18 @@ if __name__ == "__main__":
     noise = args.noise
     noise_analytic = args.noise_analytic
     save_window = args.save_window
+    auto = args.auto
+
+    idx = np.array([0, 4, 7, 9]) if auto else np.arange(10)
     
-    worker = PowerWorker(nside, power, noise, noise_analytic, False)
+    worker = PowerWorker(nside, power, noise, noise_analytic, save_window)
     pool = schwimmbad.choose_pool(mpi=args.mpi, processes=args.n_cores)
     ncores = get_processor_count(pool, args)
     print(f"Running with mpi={args.mpi} with ncores = {ncores}")
+    print(f"power = {power}, noise = {noise}, noise_analytic = {noise_analytic}, window={save_window}, auto={auto}")
+
     if power:
-        pool.map(worker.run, np.array([0, 4, 7, 9]))
+        pool.map(worker.run, idx)
     if noise:
         pool.map(worker.run_noise, np.array([0, 1, 2, 3]))
 
