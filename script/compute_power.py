@@ -57,7 +57,7 @@ class PowerWorker(object):
         i, j = BIN_PAIRS[idx]
         print(f"Running nside={nside} for bin pair ({i}, {j})")
         power = np.zeros((3, self.ell_max), dtype=float)
-        power_file = os.path.join(self.output_folder, f"pseudo_ps_{nside}_{i}_{j}.fits")
+        power_file = os.path.join(self.output_folder, f"pseudo_ps_{i}_{j}.fits")
         if os.path.exists(power_file) and not self.overwrite:
             print(f"{power_file} exists and overwrite is set to False")
             return
@@ -72,6 +72,7 @@ class PowerWorker(object):
         # Auto power spectra
         if i == j:
             cl_coupled = nmt.compute_coupled_cell(field_i, field_i)
+        # Cross power spectra
         else:
             data_j = self.load_data(j)
             pixels_j = hp.ang2pix(self.nside, data_j["ra"], data_j["dec"], lonlat=True)
@@ -102,7 +103,7 @@ class PowerWorker(object):
             Nl = self.get_noise_analytic(pixels, data["e1"], data["e2"], data["weight"])
             Nl = Nl * np.ones(self.ell_max)
             noise_file = os.path.join(
-                self.output_folder, f"noise_analytic_{self.nside}_{idx}.fits"
+                self.output_folder, f"noise_analytic_{idx}.fits"
             )
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
@@ -112,7 +113,7 @@ class PowerWorker(object):
                 pixels, data["e1"], data["e2"], data["e_rms"], data["sigma_e"]
             )
             noise_file = os.path.join(
-                self.output_folder, f"noise_sim_{self.nside}_{idx}.fits"
+                self.output_folder, f"noise_sim_{idx}.fits"
             )
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
@@ -168,7 +169,7 @@ class PowerWorker(object):
 
         if save_window:
             window_file = os.path.join(
-                self.output_folder, f"window_{self.nside}_{i}.fits"
+                self.output_folder, f"window_{i}.fits"
             )
             if os.path.exists(window_file) and not self.overwrite:
                 print(
@@ -190,7 +191,12 @@ class PowerWorker(object):
         e2_weight = np.bincount(
             pixels, weights=e2**2 * weight**2, minlength=self.npix
         )
-        Nl = 0.5 * (np.mean(e1_weight.nonzero()) + np.mean(e2_weight.nonzero()))
+        weight_map = np.bincount(
+            pixels, weights=weight, minlength=self.npix
+        )
+        e1_weight[weight_map != 0] /= weight_map[weight_map != 0]
+        e2_weight[weight_map != 0] /= weight_map[weight_map != 0]
+        Nl = 0.5 * (np.mean(e1_weight) + np.mean(e2_weight))
         Nl *= self.Omega_pix
         return Nl
 
@@ -287,6 +293,8 @@ if __name__ == "__main__":
 
     idx = np.array([0, 4, 7, 9]) if auto else np.arange(10)
 
+    start = time.time()
+
     worker = PowerWorker(nside, power, noise, noise_analytic, save_window)
     pool = schwimmbad.choose_pool(mpi=args.mpi, processes=args.n_cores)
     ncores = get_processor_count(pool, args)
@@ -300,4 +308,7 @@ if __name__ == "__main__":
     if noise:
         pool.map(worker.run_noise, np.array([0, 1, 2, 3]))
 
+    end = time.time()
     pool.close()
+
+    print(f"Power Spectra took {end - start} seconds")
