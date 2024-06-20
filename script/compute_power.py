@@ -43,13 +43,17 @@ class PowerWorker(object):
         self.ell_max = 3 * nside
         self.Omega_pix = hp.nside2pixarea(nside, degrees=False)
 
+        self.output_folder = os.path.join("../data", f"output_{nside}")
+        if not os.path.exists(self.output_folder):
+            os.makedir(self.output_folder)
+
     def run(self, idx):
         if not power: return
         start = time.time()
         i, j = BIN_PAIRS[idx]
         print(f"Running nside={nside} for bin pair ({i}, {j})")
         power = np.zeros((3, self.ell_max), dtype=float)
-        power_file = os.path.join("../data", f"pseudo_ps_{nside}_{i}_{j}.fits")
+        power_file = os.path.join(output_folder, f"pseudo_ps_{nside}_{i}_{j}.fits")
         if os.path.exists(power_file) and not self.overwrite:
             print(f"{power_file} exists and overwrite is set to False")
             return
@@ -81,13 +85,13 @@ class PowerWorker(object):
         if self.noise_analytic:
             Nl = self.get_noise_analytic(pixels, data["e1"], data["e2"], data["weight"])
             Nl = Nl * np.ones(self.ell_max)
-            noise_file = os.path.join("../data", f"noise_analytic_{self.nside}_{idx}.fits")
+            noise_file = os.path.join(self.output_folder, f"noise_analytic_{self.nside}_{idx}.fits")
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
             pyfits.writeto(noise_file, Nl, overwrite=True)
         else:
             Nl = self.get_noise_sim(pixels, data["e1"], data["e2"], data["e_rms"], data["sigma_e"])
-            noise_file = os.path.join("../data", f"noise_sim_{self.nside}_{idx}.fits")
+            noise_file = os.path.join(self.output_folder, f"noise_sim_{self.nside}_{idx}.fits")
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
             pyfits.writeto(noise_file, Nl, overwrite=True)
@@ -134,13 +138,12 @@ class PowerWorker(object):
         mask[pixels] = 1
 
         if save_window:
+            if os.path.exists(window_file) and not self.overwrite:
+                print(f"Window map for redshift {i} exists and overwrite is set to False")
             window = Ngal / Nbar
             window[Ngal == 0] = hp.UNSEEN
-            window_file = os.path.join("../data", f"window_{i}_{self.nside}.fits")
-            if os.path.exists(window_file):
-                print(f"Window map for redshift {i} exists")
-            else:
-                pyfits.writeto(window_file, window)
+            window_file = os.path.join(self.output_folder, f"window_{i}_{self.nside}.fits")
+            pyfits.writeto(window_file, window, overwrite=True)
         end = time.time()
         print(f"Finished getting map {i} in {end - start} seconds.")
 
