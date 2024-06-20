@@ -11,6 +11,7 @@ import time
 import schwimmbad
 from constants import *
 
+
 def get_processor_count(pool, args):
     if isinstance(pool, schwimmbad.MPIPool):
         # MPIPool
@@ -24,9 +25,17 @@ def get_processor_count(pool, args):
         # SerialPool
         return 1
 
-class PowerWorker(object):
 
-    def __init__(self, nside, power=True, noise=False, noise_analytic=False, save_window=False, overwrite=False):
+class PowerWorker(object):
+    def __init__(
+        self,
+        nside,
+        power=True,
+        noise=False,
+        noise_analytic=False,
+        save_window=False,
+        overwrite=False,
+    ):
         self.nside = nside
         self.npix = hp.nside2npix(nside)
         self.power = power
@@ -42,7 +51,8 @@ class PowerWorker(object):
             os.mkdir(self.output_folder)
 
     def run(self, idx):
-        if not self.power: return
+        if not self.power:
+            return
         start = time.time()
         i, j = BIN_PAIRS[idx]
         print(f"Running nside={nside} for bin pair ({i}, {j})")
@@ -54,7 +64,9 @@ class PowerWorker(object):
 
         data_i = self.load_data(i)
         pixels_i = hp.ang2pix(self.nside, data_i["ra"], data_i["dec"], lonlat=True)
-        mask_i, g1_map_i, g2_map_i = self.get_map(pixels_i, data_i["g1"], data_i["g2"], self.save_window, i)
+        mask_i, g1_map_i, g2_map_i = self.get_map(
+            pixels_i, data_i["g1"], data_i["g2"], self.save_window, i
+        )
         field_i = nmt.NmtField(mask_i, [g1_map_i, g2_map_i], spin=2, lite=True)
 
         # Auto power spectra
@@ -63,13 +75,15 @@ class PowerWorker(object):
         else:
             data_j = self.load_data(j)
             pixels_j = hp.ang2pix(self.nside, data_j["ra"], data_j["dec"], lonlat=True)
-            mask_j, g1_map_j, g2_map_j = self.get_map(pixels_j, data_j["g1"], data_j["g2"], False, j)
+            mask_j, g1_map_j, g2_map_j = self.get_map(
+                pixels_j, data_j["g1"], data_j["g2"], False, j
+            )
             field_j = nmt.NmtField(mask_j, [g1_map_j, g2_map_j], spin=2, lite=True)
             cl_coupled = nmt.compute_coupled_cell(field_i, field_j)
 
-        power[0] = cl_coupled[0] # EE
-        power[1] = cl_coupled[3] # BB
-        power[2] = cl_coupled[1] # EB
+        power[0] = cl_coupled[0]  # EE
+        power[1] = cl_coupled[3]  # BB
+        power[2] = cl_coupled[1]  # EB
 
         pyfits.writeto(power_file, power, overwrite=True)
 
@@ -87,45 +101,58 @@ class PowerWorker(object):
         if self.noise_analytic:
             Nl = self.get_noise_analytic(pixels, data["e1"], data["e2"], data["weight"])
             Nl = Nl * np.ones(self.ell_max)
-            noise_file = os.path.join(self.output_folder, f"noise_analytic_{self.nside}_{idx}.fits")
+            noise_file = os.path.join(
+                self.output_folder, f"noise_analytic_{self.nside}_{idx}.fits"
+            )
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
             pyfits.writeto(noise_file, Nl, overwrite=True)
         else:
-            Nl = self.get_noise_sim(pixels, data["e1"], data["e2"], data["e_rms"], data["sigma_e"])
-            noise_file = os.path.join(self.output_folder, f"noise_sim_{self.nside}_{idx}.fits")
+            Nl = self.get_noise_sim(
+                pixels, data["e1"], data["e2"], data["e_rms"], data["sigma_e"]
+            )
+            noise_file = os.path.join(
+                self.output_folder, f"noise_sim_{self.nside}_{idx}.fits"
+            )
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
             pyfits.writeto(noise_file, Nl, overwrite=True)
 
         end = time.time()
-        print(f"Running pseudo noise power spectrum for nside={self.nside} took {end - start} seconds")
+        print(
+            f"Running pseudo noise power spectrum for nside={self.nside} took {end - start} seconds"
+        )
         return
-
 
     def load_data(self, z):
         data = pyfits.getdata(f"../data/data_z{z+1}.fits")
-        wsum = np.sum(data['i_hsmshaperegauss_derived_weight'])
-        mbias = np.sum(
-            data['i_hsmshaperegauss_derived_shear_bias_m']
-            * data['i_hsmshaperegauss_derived_weight']
-        ) / wsum
+        wsum = np.sum(data["i_hsmshaperegauss_derived_weight"])
+        mbias = (
+            np.sum(
+                data["i_hsmshaperegauss_derived_shear_bias_m"]
+                * data["i_hsmshaperegauss_derived_weight"]
+            )
+            / wsum
+        )
         msel, asel, msel_err, asel_err = catutil.get_sel_bias(
-            data['i_hsmshaperegauss_derived_weight'],
-            data['i_apertureflux_10_mag'],
-            data['i_hsmshaperegauss_resolution'],
+            data["i_hsmshaperegauss_derived_weight"],
+            data["i_apertureflux_10_mag"],
+            data["i_hsmshaperegauss_resolution"],
         )
         g1, g2 = catutil.get_shear_regauss(data, mbias, msel, asel)
         ra, dec = catutil.get_radec(data)
         e1, e2 = catutil.get_gal_ellip(data)
         return {
-                "g1": g1, "g2": g2,
-                "ra": ra, "dec": dec,
-                "e1": e1, "e2": e2,
-                "e_rms": data["i_hsmshaperegauss_derived_rms_e"],
-                "sigma_e": data["i_hsmshaperegauss_derived_sigma_e"],
-                "weight": data["i_hsmshaperegauss_derived_weight"],
-                }
+            "g1": g1,
+            "g2": g2,
+            "ra": ra,
+            "dec": dec,
+            "e1": e1,
+            "e2": e2,
+            "e_rms": data["i_hsmshaperegauss_derived_rms_e"],
+            "sigma_e": data["i_hsmshaperegauss_derived_sigma_e"],
+            "weight": data["i_hsmshaperegauss_derived_weight"],
+        }
 
     def get_map(self, pixels, g1, g2, save_window, i):
         start = time.time()
@@ -140,9 +167,13 @@ class PowerWorker(object):
         mask[pixels] = 1
 
         if save_window:
-            window_file = os.path.join(self.output_folder, f"window_{self.nside}_{i}.fits")
+            window_file = os.path.join(
+                self.output_folder, f"window_{self.nside}_{i}.fits"
+            )
             if os.path.exists(window_file) and not self.overwrite:
-                print(f"Window map for redshift {i} exists and overwrite is set to False")
+                print(
+                    f"Window map for redshift {i} exists and overwrite is set to False"
+                )
             else:
                 window = Ngal / Nbar
                 window[Ngal == 0] = hp.UNSEEN
@@ -153,8 +184,12 @@ class PowerWorker(object):
         return mask, g1_map, g2_map
 
     def get_noise_analytic(self, pixels, e1, e2, weight):
-        e1_weight = np.bincount(pixels, weights=e1**2 * weight**2, minlength=self.npix)
-        e2_weight = np.bincount(pixels, weights=e2**2 * weight**2, minlength=self.npix)
+        e1_weight = np.bincount(
+            pixels, weights=e1**2 * weight**2, minlength=self.npix
+        )
+        e2_weight = np.bincount(
+            pixels, weights=e2**2 * weight**2, minlength=self.npix
+        )
         Nl = 0.5 * (np.mean(e1_weight.nonzero()) + np.mean(e2_weight.nonzero()))
         Nl *= self.Omega_pix
         return Nl
@@ -179,21 +214,21 @@ class PowerWorker(object):
                 shape1_meas=meas1,
                 shape2_meas=meas2,
             )
-            mask, g1_map, g2_map = self.get_map(pixels, e1_mock, e2_mock, save_window=False, i=seed)
+            mask, g1_map, g2_map = self.get_map(
+                pixels, e1_mock, e2_mock, save_window=False, i=seed
+            )
             field = nmt.NmtField(mask, [g1_map, g2_map], spin=2, lite=True)
             cl_coupled = nmt.compute_coupled_cell(field, field)
-            Nl[0, seed] = cl_coupled[0] ## EE
-            Nl[1, seed] = cl_coupled[3] ## BB
+            Nl[0, seed] = cl_coupled[0]  ## EE
+            Nl[1, seed] = cl_coupled[3]  ## BB
         Nl = np.average(Nl, axis=1)
         return Nl
+
 
 if __name__ == "__main__":
     parser = ArgumentParser(description="simulate blended images")
     parser.add_argument(
-            "--nside",
-            type=int,
-            default=128,
-            help="Nside to be used for generating maps"
+        "--nside", type=int, default=128, help="Nside to be used for generating maps"
     )
     parser.add_argument(
         "--power",
@@ -224,10 +259,7 @@ if __name__ == "__main__":
         help="whether to save the window function",
     )
     parser.add_argument(
-        "--auto",
-        default=False,
-        type=bool,
-        help="whether to only compute auto"
+        "--auto", default=False, type=bool, help="whether to only compute auto"
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument(
@@ -254,12 +286,14 @@ if __name__ == "__main__":
     auto = args.auto
 
     idx = np.array([0, 4, 7, 9]) if auto else np.arange(10)
-    
+
     worker = PowerWorker(nside, power, noise, noise_analytic, save_window)
     pool = schwimmbad.choose_pool(mpi=args.mpi, processes=args.n_cores)
     ncores = get_processor_count(pool, args)
     print(f"Running with mpi={args.mpi} with ncores = {ncores}")
-    print(f"power = {power}, noise = {noise}, noise_analytic = {noise_analytic}, window={save_window}, auto={auto}")
+    print(
+        f"power = {power}, noise = {noise}, noise_analytic = {noise_analytic}, window={save_window}, auto={auto}"
+    )
 
     if power:
         pool.map(worker.run, idx)
@@ -267,4 +301,3 @@ if __name__ == "__main__":
         pool.map(worker.run_noise, np.array([0, 1, 2, 3]))
 
     pool.close()
-
