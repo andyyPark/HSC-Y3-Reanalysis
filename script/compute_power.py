@@ -11,8 +11,6 @@ import time
 import schwimmbad
 from constants import *
 
-
-
 def get_processor_count(pool, args):
     if isinstance(pool, schwimmbad.MPIPool):
         # MPIPool
