@@ -54,16 +54,24 @@ class PowerWorker(object):
             print(f"{power_file} exists and overwrite is set to False")
             return
 
+        data_i = self.load_data(i)
+        pixels_i = hp.ang2pix(self.nside, data_i["ra"], data_i["dec"], lonlat=True)
+        mask_i, g1_map_i, g2_map_i = self.get_map(pixels_i, data_i["g1"], data_i["g2"], self.save_window, i)
+        field_i = nmt.NmtField(mask_i, [g1_map_i, g2_map_i], spin=2, lite=True)
+
         # Auto power spectra
         if i == j:
-            data_i = self.load_data(i)
-            pixels_i = hp.ang2pix(self.nside, data_i["ra"], data_i["dec"], lonlat=True)
-            mask_i, g1_map_i, g2_map_i = self.get_map(pixels_i, data_i["g1"], data_i["g2"], False, i)
-            field_i = nmt.NmtField(mask_i, [g1_map_i, g2_map_i], spin=2, lite=True)
             cl_coupled = nmt.compute_coupled_cell(field_i, field_i)
-            power[0] = cl_coupled[0] # EE
-            power[1] = cl_coupled[3] # BB
-            power[2] = cl_coupled[1] # EB
+        else:
+            data_j = self.load_data(j)
+            pixels_j = hp.ang2pix(self.nside, data_j["ra"], data_j["dec"], lonlat=True)
+            mask_j, g1_map_j, g2_map_j = self.get_map(pixels_j, data_j["g1"], data_j["g2"], False, j)
+            field_j = nmt.NmtField(mask_j, [g1_map_j, g2_map_j], spin=2, lite=True)
+            cl_coupled = nmt.compute_coupled_cell(field_i, field_j)
+
+        power[0] = cl_coupled[0] # EE
+        power[1] = cl_coupled[3] # BB
+        power[2] = cl_coupled[1] # EB
 
         pyfits.writeto(power_file, power, overwrite=True)
 
@@ -134,12 +142,12 @@ class PowerWorker(object):
         mask[pixels] = 1
 
         if save_window:
+            window_file = os.path.join(self.output_folder, f"window_{self.nside}_{i}.fits")
             if os.path.exists(window_file) and not self.overwrite:
                 print(f"Window map for redshift {i} exists and overwrite is set to False")
             else:
                 window = Ngal / Nbar
                 window[Ngal == 0] = hp.UNSEEN
-                window_file = os.path.join(self.output_folder, f"window_{self.nside}_{i}.fits")
                 pyfits.writeto(window_file, window, overwrite=True)
         end = time.time()
         print(f"Finished getting map {i} in {end - start} seconds.")
