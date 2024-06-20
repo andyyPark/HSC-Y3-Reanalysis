@@ -47,15 +47,14 @@ class PowerWorker(object):
         self.Omega_pix = hp.nside2pixarea(nside, degrees=False)
 
         self.output_folder = os.path.join("../data", f"output_{nside}")
-        if not os.path.exists(self.output_folder):
-            os.mkdir(self.output_folder)
+        os.makedirs(self.output_folder, exists=True)
 
     def run(self, idx):
         if not self.power:
             return
         start = time.time()
         i, j = BIN_PAIRS[idx]
-        print(f"Running nside={nside} for bin pair ({i}, {j})")
+        print(f"Running nside={self.nside} for bin pair ({i}, {j})")
         power = np.zeros((3, self.ell_max), dtype=float)
         power_file = os.path.join(self.output_folder, f"pseudo_ps_{i}_{j}.fits")
         if os.path.exists(power_file) and not self.overwrite:
@@ -89,7 +88,7 @@ class PowerWorker(object):
         pyfits.writeto(power_file, power, overwrite=True)
 
         end = time.time()
-        print(f"nside={nside} for bin pair ({i}, {j}) took {end - start} seconds")
+        print(f"nside={self.nside} for bin pair ({i}, {j}) took {end - start} seconds")
         return
 
     def run_noise(self, idx):
@@ -102,9 +101,7 @@ class PowerWorker(object):
         if self.noise_analytic:
             Nl = self.get_noise_analytic(pixels, data["e1"], data["e2"], data["weight"])
             Nl = Nl * np.ones(self.ell_max)
-            noise_file = os.path.join(
-                self.output_folder, f"noise_analytic_{idx}.fits"
-            )
+            noise_file = os.path.join(self.output_folder, f"noise_analytic_{idx}.fits")
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
             pyfits.writeto(noise_file, Nl, overwrite=True)
@@ -112,9 +109,7 @@ class PowerWorker(object):
             Nl = self.get_noise_sim(
                 pixels, data["e1"], data["e2"], data["e_rms"], data["sigma_e"]
             )
-            noise_file = os.path.join(
-                self.output_folder, f"noise_sim_{idx}.fits"
-            )
+            noise_file = os.path.join(self.output_folder, f"noise_sim_{idx}.fits")
             if os.path.exists(noise_file) and not self.overwrite:
                 print(f"{noise_file} exists and overwrite is set to False")
             pyfits.writeto(noise_file, Nl, overwrite=True)
@@ -168,9 +163,7 @@ class PowerWorker(object):
         mask[pixels] = 1
 
         if save_window:
-            window_file = os.path.join(
-                self.output_folder, f"window_{i}.fits"
-            )
+            window_file = os.path.join(self.output_folder, f"window_{i}.fits")
             if os.path.exists(window_file) and not self.overwrite:
                 print(
                     f"Window map for redshift {i} exists and overwrite is set to False"
@@ -191,9 +184,7 @@ class PowerWorker(object):
         e2_weight = np.bincount(
             pixels, weights=e2**2 * weight**2, minlength=self.npix
         )
-        weight_map = np.bincount(
-            pixels, weights=weight, minlength=self.npix
-        )
+        weight_map = np.bincount(pixels, weights=weight, minlength=self.npix)
         e1_weight[weight_map != 0] /= weight_map[weight_map != 0]
         e2_weight[weight_map != 0] /= weight_map[weight_map != 0]
         Nl = 0.5 * (np.mean(e1_weight) + np.mean(e2_weight))
