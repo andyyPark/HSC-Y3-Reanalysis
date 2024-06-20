@@ -43,14 +43,14 @@ class TPCFWorker(object):
         self.overwrite = overwrite
 
         self.output_folder = os.path.join("../data", f"output_2pcf_{self.ntheta}")
-        os.makedirs(self.output_folder, exists=True)
+        os.makedirs(self.output_folder, exist_ok=True)
 
     def run(self, idx):
         start = time.time()
         i, j = BIN_PAIRS[idx]
         print(f"Running TPCF with {self.ntheta} bins for bin pair ({i}, {j})")
 
-        tpcf = np.zeros((6, self.ntheta), dtype=float)
+        tpcf = np.zeros((7, self.ntheta), dtype=float)
         tpcf_file = os.path.join(self.output_folder, f"tpcf_{i}_{j}.fits")
         if os.path.exists(tpcf_file) and not self.overwrite:
             print(f"{tpcf_file} exists and overwrite is set to False")
@@ -69,12 +69,13 @@ class TPCFWorker(object):
             self.cor.clear()
             self.cor.process(cat_i, cat_j)
 
-        tpcf[0] = self.cor.xip
-        tpcf[1] = self.cor.xim
-        tpcf[2] = self.cor.varxip
-        tpcf[3] = self.cor.varxim
-        tpcf[4] = self.cor.npairs
-        tpcf[5] = self.cor.weight
+        tpcf[0] = self.rnom
+        tpcf[1] = self.cor.xip
+        tpcf[2] = self.cor.xim
+        tpcf[3] = self.cor.varxip
+        tpcf[4] = self.cor.varxim
+        tpcf[5] = self.cor.npairs
+        tpcf[6] = self.cor.weight
 
         pyfits.writeto(tpcf_file, tpcf, overwrite=True)
 

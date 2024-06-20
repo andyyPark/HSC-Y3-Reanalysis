@@ -47,7 +47,7 @@ class PowerWorker(object):
         self.Omega_pix = hp.nside2pixarea(nside, degrees=False)
 
         self.output_folder = os.path.join("../data", f"output_{nside}")
-        os.makedirs(self.output_folder, exists=True)
+        os.makedirs(self.output_folder, exist_ok=True)
 
     def run(self, idx):
         if not self.power:
