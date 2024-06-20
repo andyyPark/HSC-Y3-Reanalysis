@@ -2,7 +2,9 @@ data/
 data/log/
 
 script/log/
-script/__pycache__
 script/compute_power.sh
+script/generate_wig.sh
 
 cosmosis/
+
+**/__pycache__
