@@ -3,6 +3,7 @@ data/log/
 
 script/log/
 script/compute_power.sh
+script/compute_tpcf.sh
 script/generate_wig.sh
 
 cosmosis/
