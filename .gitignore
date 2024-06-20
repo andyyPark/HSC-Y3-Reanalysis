@@ -1,4 +1,7 @@
 data/
 data/log/
+
 script/log/
+script/__pycache__
+
 cosmosis/
