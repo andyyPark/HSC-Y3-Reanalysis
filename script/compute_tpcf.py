@@ -31,6 +31,7 @@ class TPCFWorker(object):
         ntheta=17,
         min_sep=2.188,
         max_sep=332.954,
+        window=False,
         overwrite=False,
     ):
         self.ntheta = ntheta
@@ -40,6 +41,7 @@ class TPCFWorker(object):
             nbins=ntheta, min_sep=self.min_sep, max_sep=self.max_sep, sep_units="arcmin"
         )
         self.rnom = self.cor.rnom
+        self.window = window
         self.overwrite = overwrite
 
         self.output_folder = os.path.join("../data", f"output_2pcf_{self.ntheta}")
@@ -58,18 +60,21 @@ class TPCFWorker(object):
 
         data_i = self.load_data(i)
         cat_i = self.convert_data2treecat(data_i)
+        N_i = len(data_i["g1"])
         # Auto power spectra
         if i == j:
             self.cor.clear()
             self.cor.process(cat_i, cat_i)
+            N_j = N_i
         # Cross power spectra
         else:
             data_j = self.load_data(j)
             cat_j = self.convert_data2treecat(data_j)
+            N_j = len(data_j["g1"])
             self.cor.clear()
             self.cor.process(cat_i, cat_j)
 
-        tpcf[0] = self.rnom
+        tpcf[0] = self.cor.meanr
         tpcf[1] = self.cor.xip
         tpcf[2] = self.cor.xim
         tpcf[3] = self.cor.varxip
@@ -79,11 +84,34 @@ class TPCFWorker(object):
 
         pyfits.writeto(tpcf_file, tpcf, overwrite=True)
 
+        if self.window:
+            xi_W = self.run_xi_W(
+                self.cor.meanr, self.cor.bin_size, self.cor.weight, N_i, N_j
+            )
+            tpcfw_file = os.path.join(self.output_folder, f"tpcfw_{i}_{j}.fits")
+            if os.path.exists(tpcfw_file) and not self.overwrite:
+                print(f"Window {tpcfw_file} exists and overwrite is set to False")
+                return
+            pyfits.writeto(tpcfw_file, xi_W, overwrite=True)
+
         end = time.time()
         print(
             f"ntheta={self.ntheta} for bin pair ({i}, {j}) took {end - start} seconds"
         )
         return
+
+    def run_xi_W(self, theta, theta_bin_size, weight, N_i, N_j):
+        theta_rad = np.pad(
+            theta * ARCMIN2RAD,
+            (1, 1),
+            "constant",
+            constant_values=(self.min_sep * ARCMIN2RAD, self.max_sep * ARCMIN2RAD),
+        )
+        bin_area = 2.0 * np.pi * (np.cos(theta_rad[:-1]) - np.cos(theta_rad[1:]))
+        expected_weight = bin_area[:-1] * N_i * N_j * FSKY
+        xi_W = weight / expected_weight
+        xi_W /= xi_W[0]
+        return xi_W
 
     def load_data(self, z):
         data = pyfits.getdata(f"../data/data_z{z+1}.fits")
@@ -140,6 +168,9 @@ if __name__ == "__main__":
         "--max_sep", type=float, default=332.954, help="maximum sep angle in arcmin"
     )
     parser.add_argument(
+        "--window", default=False, type=bool, help="whether to compute xi_W"
+    )
+    parser.add_argument(
         "--auto", default=False, type=bool, help="whether to only compute auto"
     )
     group = parser.add_mutually_exclusive_group()
@@ -162,17 +193,20 @@ if __name__ == "__main__":
     ntheta = args.ntheta
     min_sep = args.min_sep
     max_sep = args.max_sep
+    window = args.window
     auto = args.auto
 
     idx = np.array([0, 4, 7, 9]) if auto else np.arange(10)
 
     start = time.time()
 
-    worker = TPCFWorker(ntheta, min_sep, max_sep)
+    worker = TPCFWorker(ntheta, min_sep, max_sep, window)
     pool = schwimmbad.choose_pool(mpi=args.mpi, processes=args.n_cores)
     ncores = get_processor_count(pool, args)
     print(f"Running with mpi={args.mpi} with ncores = {ncores}")
-    print(f"ntheta = {ntheta}, min_sep = {min_sep}, max_sep = {max_sep} auto = {auto}")
+    print(
+        f"ntheta = {ntheta}, min_sep = {min_sep}, max_sep = {max_sep}, window = {window}, auto = {auto}"
+    )
 
     pool.map(worker.run, idx)
 
