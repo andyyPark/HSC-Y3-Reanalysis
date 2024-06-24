@@ -5,6 +5,10 @@ script/log/
 script/compute_power.sh
 script/compute_tpcf.sh
 script/generate_wig.sh
+script/get_coupling.sh
+script/dask-vera2.sh
+script/couplingM.py
+script/temp/
 
 cosmosis/
 
