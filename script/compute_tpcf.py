@@ -9,6 +9,11 @@ import time
 import schwimmbad
 from constants import *
 import treecorr
+from mpi4py import MPI
+
+comm = MPI.COMM_WORLD
+rank = comm.Get_rank()
+size = comm.Get_size()
 
 
 def get_processor_count(pool, args):
@@ -38,7 +43,11 @@ class TPCFWorker(object):
         self.min_sep = min_sep
         self.max_sep = max_sep
         self.cor = treecorr.GGCorrelation(
-            nbins=ntheta, min_sep=self.min_sep, max_sep=self.max_sep, sep_units="arcmin"
+            nbins=ntheta,
+            min_sep=self.min_sep,
+            max_sep=self.max_sep,
+            sep_units="arcmin",
+            verbose=1,
         )
         self.rnom = self.cor.rnom
         self.window = window
@@ -46,6 +55,13 @@ class TPCFWorker(object):
 
         self.output_folder = os.path.join("../data", f"output_2pcf_{self.ntheta}")
         os.makedirs(self.output_folder, exist_ok=True)
+
+        self.patch_file = os.path.join("../data", "hscy3_patches_xxx.fits")
+        for i in range(NZ_BINS):
+            patch_file = self.patch_file.replace("xxx", "%d" % i)
+            if not os.path.exists(patch_file):
+                data = self.load_data(i)
+                self.make_patches(data, patch_file)
 
     def run(self, idx):
         start = time.time()
@@ -58,41 +74,51 @@ class TPCFWorker(object):
             print(f"{tpcf_file} exists and overwrite is set to False")
             return
 
+        gg = treecorr.GGCorrelation(
+            nbins=ntheta,
+            min_sep=self.min_sep,
+            max_sep=self.max_sep,
+            sep_units="arcmin",
+            verbose=1,
+        )
+
         data_i = self.load_data(i)
-        cat_i = self.convert_data2treecat(data_i)
+        patch_file_i = self.patch_file.replace("xxx", "%d" % i)
+        cat_i = self.convert_data2treecat(data_i, patch_file_i)
         N_i = len(data_i["g1"])
+        cat_i.get_patches()
         # Auto power spectra
         if i == j:
-            self.cor.clear()
-            self.cor.process(cat_i, cat_i)
+            gg.process(cat_i, comm=comm)
             N_j = N_i
         # Cross power spectra
         else:
             data_j = self.load_data(j)
-            cat_j = self.convert_data2treecat(data_j)
+            patch_file_j = self.patch_file.replace("xxx", "%d" % j)
+            cat_j = self.convert_data2treecat(data_j, patch_file_j)
             N_j = len(data_j["g1"])
-            self.cor.clear()
-            self.cor.process(cat_i, cat_j)
+            gg.process(cat_i, cat_j, comm=comm)
 
-        tpcf[0] = self.cor.meanr
-        tpcf[1] = self.cor.xip
-        tpcf[2] = self.cor.xim
-        tpcf[3] = self.cor.varxip
-        tpcf[4] = self.cor.varxim
-        tpcf[5] = self.cor.npairs
-        tpcf[6] = self.cor.weight
+        comm.Barrier()
 
-        pyfits.writeto(tpcf_file, tpcf, overwrite=True)
+        if rank == 0:
+            tpcf[0] = gg.meanr
+            tpcf[1] = gg.xip
+            tpcf[2] = gg.xim
+            tpcf[3] = gg.varxip
+            tpcf[4] = gg.varxim
+            tpcf[5] = gg.npairs
+            tpcf[6] = gg.weight
 
-        if self.window:
-            xi_W = self.run_xi_W(
-                self.cor.meanr, self.cor.bin_size, self.cor.weight, N_i, N_j
-            )
-            tpcfw_file = os.path.join(self.output_folder, f"tpcfw_{i}_{j}.fits")
-            if os.path.exists(tpcfw_file) and not self.overwrite:
-                print(f"Window {tpcfw_file} exists and overwrite is set to False")
-                return
-            pyfits.writeto(tpcfw_file, xi_W, overwrite=True)
+            pyfits.writeto(tpcf_file, tpcf, overwrite=True)
+
+            if self.window:
+                xi_W = self.run_xi_W(gg.meanr, gg.bin_size, gg.weight, N_i, N_j)
+                tpcfw_file = os.path.join(self.output_folder, f"tpcfw_{i}_{j}.fits")
+                if os.path.exists(tpcfw_file) and not self.overwrite:
+                    print(f"Window {tpcfw_file} exists and overwrite is set to False")
+                    return
+                pyfits.writeto(tpcfw_file, xi_W, overwrite=True)
 
         end = time.time()
         print(
@@ -143,8 +169,8 @@ class TPCFWorker(object):
             "weight": data["i_hsmshaperegauss_derived_weight"],
         }
 
-    def convert_data2treecat(self, data):
-        tree_cat = treecorr.Catalog(
+    def convert_data2treecat(self, data, patch_file):
+        cat = treecorr.Catalog(
             g1=data["g1"],
             g2=-data["g2"],
             ra=data["ra"],
@@ -152,8 +178,29 @@ class TPCFWorker(object):
             w=data["weight"],
             ra_units="deg",
             dec_units="deg",
+            patch_centers=patch_file,
+            verbose=1,
         )
-        return tree_cat
+        return cat
+
+    def make_patches(self, data, patch_file):
+        if not os.path.exists(self.patch_file):
+            print("Making patches")
+            cat = treecorr.Catalog(
+                g1=data["g1"],
+                g2=-data["g2"],
+                ra=data["ra"],
+                dec=data["dec"],
+                w=data["weight"],
+                ra_units="deg",
+                dec_units="deg",
+                npatch=28,
+                verbose=2,
+            )
+            cat.get_patches()
+            cat.write_patch_centers(patch_file)
+        else:
+            print("Using existing patch file")
 
 
 if __name__ == "__main__":
@@ -171,22 +218,7 @@ if __name__ == "__main__":
         "--window", default=False, type=bool, help="whether to compute xi_W"
     )
     parser.add_argument(
-        "--auto", default=False, type=bool, help="whether to only compute auto"
-    )
-    group = parser.add_mutually_exclusive_group()
-    group.add_argument(
-        "--ncores",
-        dest="n_cores",
-        default=1,
-        type=int,
-        help="Number of processes (uses multiprocessing).",
-    )
-    group.add_argument(
-        "--mpi",
-        dest="mpi",
-        default=False,
-        action="store_true",
-        help="Run with MPI.",
+        "--idx", type=int, default=0, help="idx of bin pair to compute 2pcf"
     )
 
     args = parser.parse_args()
@@ -194,23 +226,13 @@ if __name__ == "__main__":
     min_sep = args.min_sep
     max_sep = args.max_sep
     window = args.window
-    auto = args.auto
-
-    idx = np.array([0, 4, 7, 9]) if auto else np.arange(10)
+    idx = args.idx
 
     start = time.time()
 
     worker = TPCFWorker(ntheta, min_sep, max_sep, window)
-    pool = schwimmbad.choose_pool(mpi=args.mpi, processes=args.n_cores)
-    ncores = get_processor_count(pool, args)
-    print(f"Running with mpi={args.mpi} with ncores = {ncores}")
-    print(
-        f"ntheta = {ntheta}, min_sep = {min_sep}, max_sep = {max_sep}, window = {window}, auto = {auto}"
-    )
-
-    pool.map(worker.run, idx)
+    worker.run(idx)
 
     end = time.time()
-    pool.close()
 
     print(f"TPCF took {end - start} seconds")
