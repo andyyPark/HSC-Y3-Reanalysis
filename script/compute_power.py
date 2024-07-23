@@ -10,6 +10,7 @@ import pymaster as nmt
 import time
 import schwimmbad
 from constants import *
+from maps import ShearMap
 
 
 def get_processor_count(pool, args):
@@ -62,10 +63,14 @@ class PowerWorker(object):
             return
 
         data_i = self.load_data(i)
-        pixels_i = hp.ang2pix(self.nside, data_i["ra"], data_i["dec"], lonlat=True)
-        mask_i, g1_map_i, g2_map_i = self.get_map(
-            pixels_i, data_i["g1"], data_i["g2"], self.save_window, i
-        )
+        sm_i = ShearMap(self.nside, data_i)
+        window_file = os.path.join(self.output_folder, f"window_{i}.fits")
+        if self.save_window and not os.path.exists(window_file):
+            window = sm_i.window()
+            pyfits.writeto(window_file, window)
+
+        g1_map_i, g2_map_i = sm_i.run()
+        mask_i = sm_i.mask()
         field_i = nmt.NmtField(mask_i, [g1_map_i, g2_map_i], spin=2, lite=True)
 
         # Auto power spectra
@@ -74,10 +79,9 @@ class PowerWorker(object):
         # Cross power spectra
         else:
             data_j = self.load_data(j)
-            pixels_j = hp.ang2pix(self.nside, data_j["ra"], data_j["dec"], lonlat=True)
-            mask_j, g1_map_j, g2_map_j = self.get_map(
-                pixels_j, data_j["g1"], data_j["g2"], False, j
-            )
+            sm_j = ShearMap(self.nside, data_j)
+            g1_map_j, g2_map_j = sm_j.run()
+            mask_j = sm_j.mask()
             field_j = nmt.NmtField(mask_j, [g1_map_j, g2_map_j], spin=2, lite=True)
             cl_coupled = nmt.compute_coupled_cell(field_i, field_j)
 
@@ -149,34 +153,6 @@ class PowerWorker(object):
             "sigma_e": data["i_hsmshaperegauss_derived_sigma_e"],
             "weight": data["i_hsmshaperegauss_derived_weight"],
         }
-
-    def get_map(self, pixels, g1, g2, save_window, i):
-        start = time.time()
-        print(f"Getting map {i}")
-        Ngal = np.bincount(pixels, minlength=self.npix)
-        Nbar = np.average(Ngal[Ngal != 0])
-        print(f"Nbar for {i} is {Nbar}")
-        g1_map = np.bincount(pixels, weights=g1, minlength=self.npix) / Nbar
-        g2_map = np.bincount(pixels, weights=g2, minlength=self.npix) / Nbar
-        g1_map[Ngal == 0] = hp.UNSEEN
-        g2_map[Ngal == 0] = hp.UNSEEN
-        mask = np.zeros(self.npix, dtype=int)
-        mask[pixels] = 1
-
-        if save_window:
-            window_file = os.path.join(self.output_folder, f"window_{i}.fits")
-            if os.path.exists(window_file) and not self.overwrite:
-                print(
-                    f"Window map for redshift {i} exists and overwrite is set to False"
-                )
-            else:
-                window = Ngal / Nbar
-                window[Ngal == 0] = hp.UNSEEN
-                pyfits.writeto(window_file, window, overwrite=True)
-        end = time.time()
-        print(f"Finished getting map {i} in {end - start} seconds.")
-
-        return mask, g1_map, g2_map
 
     def get_noise_analytic(self, pixels, e1, e2, weight):
         e1_weight = np.bincount(
