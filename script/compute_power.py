@@ -155,6 +155,7 @@ class PowerWorker(object):
         print(f"Getting map {i}")
         Ngal = np.bincount(pixels, minlength=self.npix)
         Nbar = np.average(Ngal[Ngal != 0])
+        print(f"Nbar for {i} is {Nbar}")
         g1_map = np.bincount(pixels, weights=g1, minlength=self.npix) / Nbar
         g2_map = np.bincount(pixels, weights=g2, minlength=self.npix) / Nbar
         g1_map[Ngal == 0] = hp.UNSEEN
